@@ -82,10 +82,13 @@ function mockPickResponse(systemPrompt = '', userMessage = '', opts = {}) {
 }
 
 async function callDeepSeek({ systemPrompt, userMessage, opts = {} }) {
+  const jsonOnlyInstruction = opts.noJsonFormat
+    ? ''
+    : '\n\n重要：你必须只输出一个合法 JSON 对象，不要输出 Markdown、代码块、解释、前后缀或任何 JSON 之外的内容。';
   const body = {
     model: opts.model || process.env.DEEPSEEK_MODEL || 'deepseek-chat',
     messages: [
-      { role: 'system', content: systemPrompt || '' },
+      { role: 'system', content: (systemPrompt || '') + jsonOnlyInstruction },
       { role: 'user', content: userMessage || '' }
     ],
     temperature: opts.temperature ?? 0.7,
@@ -113,13 +116,48 @@ async function callDeepSeek({ systemPrompt, userMessage, opts = {} }) {
       throw err;
     }
     const json = JSON.parse(raw);
+    let text = json.choices?.[0]?.message?.content || '';
+    if (!opts.noJsonFormat) text = extractJsonText(text);
     return {
-      text: json.choices?.[0]?.message?.content || '',
+      text,
       usage: json.usage || null
     };
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function extractJsonText(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return raw;
+  try {
+    JSON.parse(raw);
+    return raw;
+  } catch (_) {
+    // continue
+  }
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) {
+    const inner = fenced[1].trim();
+    try {
+      JSON.parse(inner);
+      return inner;
+    } catch (_) {
+      // continue
+    }
+  }
+  const firstObj = raw.indexOf('{');
+  const lastObj = raw.lastIndexOf('}');
+  if (firstObj >= 0 && lastObj > firstObj) {
+    const sliced = raw.slice(firstObj, lastObj + 1);
+    try {
+      JSON.parse(sliced);
+      return sliced;
+    } catch (_) {
+      // continue
+    }
+  }
+  return raw;
 }
 
 app.get('/healthz', (_req, res) => {

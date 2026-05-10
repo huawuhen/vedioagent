@@ -119,11 +119,31 @@
     }
     // 2) 剧本拆解技能
     if (/剧本拆解|breakdown/i.test(sys)) {
-      return '【风格指南】\n艺术风格：写实悬疑电影质感\n色彩基调：冷蓝偏灰\n\n【主要角色】（演示数据，详情见已生成的拆解 V2 文档）\n\n【关键场景】（演示数据）\n\n【关键道具】（演示数据）';
+      return JSON.stringify({
+        styleGuide: {
+          artStyle: '写实悬疑电影质感',
+          colorGrading: '低饱和冷蓝偏灰，关键道具用暖色点缀',
+          era: '当代都市',
+          negativePrompts: '模糊, 变形, 卡通, 低质量'
+        },
+        characters: [],
+        scenes: [],
+        props: []
+      });
     }
     // 3) 分镜脚本技能
     if (/分镜|storyboard/i.test(sys)) {
-      return '【片名】演示分镜\n【时长】6 分钟\n【镜头总数】14\n\n（演示数据，详情见已生成的分镜脚本 V2 文档）';
+      return JSON.stringify({
+        meta: {
+          projectType: '短剧',
+          aspectRatio: '9:16',
+          styleRef: '悬疑电影质感',
+          episodes: '1',
+          duration: '60s',
+          totalShots: 0
+        },
+        scenes: []
+      });
     }
     // 4) 默认
     return '收到。基于你的需求，已经为你完成了相应的处理。详情见下方资产卡片。';
@@ -152,6 +172,31 @@
     if (!data.text || !String(data.text).trim()) throw new Error('API 返回空响应，请重试');
     if (onChunk) onChunk(data.text, data.text);
     return data;
+  }
+
+  function parseModelJson(text) {
+    const raw = String(text || '').trim();
+    if (!raw) throw new Error('empty');
+    try { return JSON.parse(raw); } catch (_) { /* try extraction below */ }
+
+    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenced && fenced[1]) {
+      try { return JSON.parse(fenced[1].trim()); } catch (_) { /* continue */ }
+    }
+
+    const firstObj = raw.indexOf('{');
+    const lastObj = raw.lastIndexOf('}');
+    if (firstObj >= 0 && lastObj > firstObj) {
+      try { return JSON.parse(raw.slice(firstObj, lastObj + 1)); } catch (_) { /* continue */ }
+    }
+
+    const firstArr = raw.indexOf('[');
+    const lastArr = raw.lastIndexOf(']');
+    if (firstArr >= 0 && lastArr > firstArr) {
+      return JSON.parse(raw.slice(firstArr, lastArr + 1));
+    }
+
+    throw new Error('invalid json');
   }
 
   // Deep-clone projects so mutations don't touch MOCK source
@@ -2515,7 +2560,7 @@
       if (idx >= 0) sess.messages.splice(idx, 1);
 
       let parsed;
-      try { parsed = JSON.parse(resultText); } catch (e) {
+      try { parsed = parseModelJson(resultText); } catch (e) {
         const preview = resultText.substring(0, 300);
         sess.messages.push({ role: 'ai', text: '返回数据解析失败（非合法 JSON），请重试。\n\n原始输出预览：\n' + preview + (resultText.length > 300 ? '...' : '') });
         toast('JSON 解析失败');
