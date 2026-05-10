@@ -1974,6 +1974,7 @@
     // Normal mode: inline horizontal row — all thumbs visible + trailing + card
     state.refMaterials.forEach((r, i) => {
       const card = el('div', 'attach-card filled');
+      card.title = r.name || '附件';
       if (r.type === 'image' && r.src) {
         card.innerHTML = `<img src="${r.src}" alt="${escape(r.name || '')}" />`;
       } else if (r.type === 'video') {
@@ -2001,7 +2002,7 @@
       } else {
         plus.innerHTML = `${icon('plus')}<span>参考</span><span class="count">${state.refMaterials.length}/12</span>`;
       }
-      plus.onclick = () => { addGenericRef(); };
+      plus.onclick = (e) => { e.stopPropagation(); openReferenceFilePicker(); };
       area.appendChild(plus);
     }
 
@@ -2022,11 +2023,118 @@
     $('#scrollRight')?.classList.toggle('show', canRight);
   }
 
-  function addGenericRef() {
-    if (state.refMaterials.length >= 12) { toast('最多 12 个附件'); return; }
-    state.refMaterials.push({ id: 'r_' + Date.now(), type: 'generic', name: '附件' });
+  const REF_ACCEPT = [
+    '.txt', '.md', '.markdown', '.json', '.csv', '.doc', '.docx', '.pdf',
+    'text/plain', 'text/markdown', 'application/json', 'text/csv',
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'image/png', 'image/jpeg', 'image/webp', 'image/gif',
+    'video/mp4', 'video/webm', 'audio/mpeg', 'audio/wav'
+  ];
+  const TEXT_FILE_TYPES = new Set(['text/plain', 'text/markdown', 'application/json', 'text/csv']);
+  const TEXT_FILE_EXTS = /\.(txt|md|markdown|json|csv)$/i;
+  const REF_FILE_MAX_BYTES = 25 * 1024 * 1024;
+
+  function refKindFromFile(file) {
+    if (file.type.startsWith('image/')) return 'image';
+    if (file.type.startsWith('video/')) return 'video';
+    if (file.type.startsWith('audio/')) return 'audio';
+    if (TEXT_FILE_TYPES.has(file.type) || TEXT_FILE_EXTS.test(file.name)) return 'text';
+    if (/(\.docx?|\.pdf)$/i.test(file.name) || /pdf|word/.test(file.type)) return 'text';
+    return 'generic';
+  }
+
+  function ensureReferenceFileInput() {
+    let input = $('#referenceFileInput');
+    if (input) return input;
+    input = document.createElement('input');
+    input.id = 'referenceFileInput';
+    input.type = 'file';
+    input.multiple = true;
+    input.accept = REF_ACCEPT.join(',');
+    input.style.display = 'none';
+    input.onchange = () => {
+      const files = Array.from(input.files || []);
+      addReferenceFiles(files);
+      input.value = '';
+    };
+    document.body.appendChild(input);
+    return input;
+  }
+
+  function openReferenceFilePicker() {
+    ensureReferenceFileInput().click();
+  }
+
+  async function addReferenceFiles(files) {
+    if (!files || files.length === 0) return;
+    const remaining = 12 - state.refMaterials.length;
+    if (remaining <= 0) { toast('最多 12 个附件'); return; }
+    const selected = files.slice(0, remaining);
+    if (files.length > remaining) toast('最多 12 个附件，已添加前 ' + remaining + ' 个');
+
+    for (const file of selected) {
+      if (file.size > REF_FILE_MAX_BYTES) {
+        toast(file.name + ' 超过 25MB，已跳过');
+        continue;
+      }
+      try {
+        const type = refKindFromFile(file);
+        const ref = {
+          id: newId('ref'),
+          type,
+          name: file.name,
+          mime: file.type || '',
+          size: file.size,
+          uploadedAt: Date.now()
+        };
+        if (type === 'image' || type === 'video' || type === 'audio') {
+          ref.src = await readFileAsDataURL(file);
+        } else if (TEXT_FILE_TYPES.has(file.type) || TEXT_FILE_EXTS.test(file.name)) {
+          ref.body = await readFileAsText(file);
+          ref.src = 'assets/placeholder-image-h.svg';
+        } else {
+          ref.body = `【已上传文件】${file.name}\n文件类型：${file.type || '未知'}\n大小：${Math.ceil(file.size / 1024)}KB\n\n当前版本已记录文件名和元数据；PDF/DOC/DOCX 正文解析建议在后端接入专用解析服务。`;
+          ref.src = 'assets/placeholder-image-h.svg';
+        }
+        state.refMaterials.push(ref);
+      } catch (err) {
+        console.warn('[upload] failed', file.name, err);
+        toast(file.name + ' 读取失败');
+      }
+    }
     renderAttachArea();
     updateSendBtn();
+  }
+
+  function readFileAsText(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(reader.error || new Error('read failed'));
+      reader.readAsText(file);
+    });
+  }
+
+  function readFileAsDataURL(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(reader.error || new Error('read failed'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function buildTextWithUploadedDocs(text) {
+    const docs = state.refMaterials.filter(r => r.type === 'text' && r.body);
+    if (docs.length === 0) return text;
+    const docText = docs.map((r, i) => {
+      const body = String(r.body || '').slice(0, 12000);
+      const clipped = String(r.body || '').length > 12000 ? '\n\n【内容已截断】' : '';
+      return `## 上传文档 ${i + 1}: ${r.name}\n${body}${clipped}`;
+    }).join('\n\n');
+    return `${text || '请处理上传文档'}\n\n${docText}`.trim();
   }
 
   // ───── dropdowns (input controls) ─────
@@ -2284,21 +2392,22 @@
       src:  r.src || 'assets/placeholder-image-h.svg',
       name: r.name || (r.type === 'video' ? `视频${i+1}` : `图片${i+1}`)
     }));
+    const textWithUploads = task === 'text' ? buildTextWithUploadedDocs(text) : text;
 
     if (task === 'text') {
       const sk = getAllSkills().find(s => s.id === state.skill);
       const skillLabel = sk ? sk.label : '技能';
 
       if (state._skillCreationMode) {
-        sess.messages.push({ role: 'user', text: text || '请生成技能' });
-        const skillName = text.match(/["""](.+?)["""]/) ? text.match(/["""](.+?)["""]/)[1] : '角色分析';
+        sess.messages.push({ role: 'user', text: textWithUploads || '请生成技能' });
+        const skillName = textWithUploads.match(/["""](.+?)["""]/) ? textWithUploads.match(/["""](.+?)["""]/)[1] : '角色分析';
         sess.messages.push({ role: 'ai', text: `已根据你的描述生成技能「${skillName}」，请下载后通过「上传技能」导入使用。`, skillFile: skillName });
         state._skillCreationMode = false;
       } else if (hasAnnotations) {
         const annText = state.annotations.map((a, i) => `批注${i+1}: "${a.quote.substring(0, 40)}..." → ${a.comment}`).join('\n');
         sess.messages.push({
           role: 'user',
-          request: { task, text: (text ? text + '\n\n' : '') + annText, refs, model: state.controls.model, skill: skillLabel }
+          request: { task, text: (textWithUploads ? textWithUploads + '\n\n' : '') + annText, refs, model: state.controls.model, skill: skillLabel }
         });
         const doc = M.TEXT_DOC_MOCK;
         const newVersion = (doc.version || 1) + 1;
@@ -2314,18 +2423,18 @@
       } else if (state.skill === 'storyboard' && !state._storyboardQA) {
         sess.messages.push({
           role: 'user',
-          request: { task, text, refs, model: state.controls.model, skill: skillLabel }
+          request: { task, text: textWithUploads, refs, model: state.controls.model, skill: skillLabel }
         });
-        startStoryboardQA(text);
+        startStoryboardQA(textWithUploads);
       } else {
         sess.messages.push({
           role: 'user',
-          request: { task, text, refs, model: state.controls.model, skill: skillLabel }
+          request: { task, text: textWithUploads, refs, model: state.controls.model, skill: skillLabel }
         });
         const genMsg = { role: 'ai', textGen: { pct: 0, skillLabel, model: state.controls.model } };
         sess.messages.push(genMsg);
         renderMessages();
-        executeSkill(state.skill, text, sess, genMsg, skillLabel);
+        executeSkill(state.skill, textWithUploads, sess, genMsg, skillLabel);
       }
     } else {
       sess.messages.push({
