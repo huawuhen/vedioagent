@@ -14,7 +14,35 @@
   // ─── Demo mode (for GitHub Pages public demo) ──────────────────────
   // When true: callLLM bypasses real DeepSeek API, returns canned responses
   // with simulated streaming so the UI feels "AI working" without any network.
-  const MOCK_MODE = true;
+  let APP_CONFIG = { mockMode: true, provider: 'mock', persistence: 'localStorage' };
+  let MOCK_MODE = true;
+
+  async function loadAppConfig() {
+    try {
+      const resp = await fetch('/api/config', { headers: { 'Accept': 'application/json' } });
+      if (!resp.ok) throw new Error('config request failed');
+      APP_CONFIG = await resp.json();
+      MOCK_MODE = !!APP_CONFIG.mockMode;
+    } catch (e) {
+      APP_CONFIG = { mockMode: true, provider: 'mock', persistence: 'localStorage' };
+      MOCK_MODE = true;
+      console.warn('[config] using local mock fallback', e);
+    }
+  }
+
+  async function apiJson(path, options = {}) {
+    const resp = await fetch(path, {
+      ...options,
+      headers: {
+        'Accept': 'application/json',
+        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(options.headers || {})
+      }
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || data.message || ('HTTP ' + resp.status));
+    return data;
+  }
 
   // ───── LLM API infrastructure ─────
   const skillCache = {};
@@ -112,114 +140,18 @@
         try { onChunk(acc, c); } catch (e) { /* swallow */ }
       }
     }
-    return response;
+    return { text: response, usage: null, mock: true };
   }
 
   async function callLLM(systemPrompt, userMessage, onChunk, opts = {}) {
     if (MOCK_MODE) return mockCallLLM(systemPrompt, userMessage, onChunk, opts);
-    const apiKey = await requireApiKey();
-    if (!apiKey) throw new Error('未设置 API Key');
-
-    const timeoutMs = opts.timeoutMs || 120000;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-    // Build user message content — multimodal when images provided & valid (http/https/data URL)
-    const validImages = (opts.images || []).filter(u => /^(https?:|data:)/i.test(u || ''));
-    const userContent = validImages.length > 0
-      ? [
-          { type: 'text', text: userMessage },
-          ...validImages.map(u => ({ type: 'image_url', image_url: { url: u } }))
-        ]
-      : userMessage;
-
-    const body = {
-      model: opts.model || 'deepseek-chat',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userContent }
-      ],
-      stream: true,
-      temperature: opts.temperature ?? 0.7,
-      max_tokens: opts.maxTokens || 16384
-    };
-    if (!opts.noJsonFormat) body.response_format = { type: 'json_object' };
-
-    let resp;
-    try {
-      resp = await fetch('https://api.deepseek.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + apiKey
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal
-      });
-    } catch (e) {
-      clearTimeout(timeoutId);
-      if (e.name === 'AbortError') throw new Error('请求超时（' + Math.floor(timeoutMs / 1000) + 's），请重试');
-      throw new Error('网络请求失败：' + (e.message || '无法连接 DeepSeek API'));
-    }
-
-    if (!resp.ok) {
-      clearTimeout(timeoutId);
-      let errBody = '';
-      try { errBody = await resp.text(); } catch (e) { /* noop */ }
-      if (resp.status === 401) {
-        localStorage.removeItem('deepseek_api_key');
-        throw new Error('API Key 无效，请重新设置');
-      }
-      if (resp.status === 402 || resp.status === 429) {
-        throw new Error('API 配额或速率限制（' + resp.status + '），请稍后重试');
-      }
-      if (resp.status >= 500) {
-        throw new Error('DeepSeek 服务异常（' + resp.status + '），请稍后重试');
-      }
-      throw new Error('API 请求失败（' + resp.status + '）：' + (errBody.substring(0, 200) || '未知错误'));
-    }
-
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let fullText = '';
-    let buffer = '';
-    let usage = null;
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed === 'data: [DONE]') continue;
-          if (!trimmed.startsWith('data: ')) continue;
-          try {
-            const json = JSON.parse(trimmed.slice(6));
-            const delta = json.choices?.[0]?.delta?.content;
-            if (delta) {
-              fullText += delta;
-              if (onChunk) onChunk(fullText, delta);
-            }
-            if (json.usage) usage = json.usage;
-          } catch (e) { /* skip malformed chunk */ }
-        }
-      }
-    } catch (e) {
-      clearTimeout(timeoutId);
-      if (e.name === 'AbortError') throw new Error('响应中断，请重试');
-      throw new Error('读取响应失败：' + (e.message || '流被中断'));
-    }
-
-    clearTimeout(timeoutId);
-
-    if (!fullText.trim()) {
-      throw new Error('API 返回空响应，请重试');
-    }
-
-    return { text: fullText, usage };
+    const data = await apiJson('/api/llm', {
+      method: 'POST',
+      body: JSON.stringify({ systemPrompt, userMessage, opts })
+    });
+    if (!data.text || !String(data.text).trim()) throw new Error('API 返回空响应，请重试');
+    if (onChunk) onChunk(data.text, data.text);
+    return data;
   }
 
   // Deep-clone projects so mutations don't touch MOCK source
@@ -411,6 +343,12 @@
     });
 
     const tryWrite = () => localStorage.setItem(PERSIST_KEY, JSON.stringify(snapshot));
+    if (APP_CONFIG.persistence !== 'localStorage') {
+      apiJson('/api/state', {
+        method: 'PUT',
+        body: JSON.stringify(snapshot)
+      }).catch(e => console.warn('[persist] server write failed', e));
+    }
     try {
       tryWrite();
     } catch (e) {
@@ -426,9 +364,17 @@
     }
   }
 
-  function loadPersistedState() {
+  async function loadPersistedState() {
     let raw;
-    try { raw = localStorage.getItem(PERSIST_KEY); } catch (e) { console.warn('[persist] read failed', e); return; }
+    try {
+      if (APP_CONFIG.persistence !== 'localStorage') {
+        const data = await apiJson('/api/state');
+        if (data && data.state) raw = JSON.stringify(data.state);
+      }
+    } catch (e) {
+      console.warn('[persist] server read failed; trying localStorage', e);
+    }
+    try { raw = raw || localStorage.getItem(PERSIST_KEY); } catch (e) { console.warn('[persist] read failed', e); return; }
     if (!raw) return;
     let parsed;
     try { parsed = JSON.parse(raw); } catch (e) { console.warn('[persist] corrupt JSON', e); return; }
@@ -5293,9 +5239,10 @@
   }
 
   // ───── init ─────
-  function init() {
+  async function init() {
+    await loadAppConfig();
     migrateProjects();
-    loadPersistedState();
+    await loadPersistedState();
     validateFolderRefs();
     // Demo mode: seed favoritePrompts from mock if user has none persisted
     if (!state.favoritePrompts || state.favoritePrompts.length === 0) {
@@ -5421,6 +5368,9 @@
       });
       if (!ok) return;
       try { localStorage.removeItem('va_state_v1'); } catch (_) {}
+      if (APP_CONFIG.persistence !== 'localStorage') {
+        try { await apiJson('/api/state', { method: 'DELETE' }); } catch (err) { console.warn('[persist] reset server state failed', err); }
+      }
       location.reload();
     };
     renderProfile();

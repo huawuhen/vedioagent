@@ -28,8 +28,27 @@
 ## 技术栈
 
 - 单页 HTML / Vanilla JavaScript / Tailwind CDN / Lucide Icons
-- 无依赖、无构建、无后端
-- 数据全部 mock 在 `mock/data.js`
+- Node.js / Express 后端（生产部署版）
+- Docker / Docker Compose
+- Demo 数据在 `mock/data.js`，用户状态由后端 `/api/state` 持久化
+
+## Docker 部署
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
+
+访问 `http://localhost:3000`。
+
+连接真实 DeepSeek 时，在 `.env` 中设置：
+
+```env
+MOCK_MODE=false
+DEEPSEEK_API_KEY=sk-你的-key
+```
+
+更多生产部署建议见 [`DEPLOYMENT.md`](DEPLOYMENT.md)。
 
 ## 演示话术（5-7 分钟）
 
