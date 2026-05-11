@@ -50,6 +50,12 @@
   .group-actions .icon-btn { width:24px; height:24px; }
   .group-actions .icon-btn [data-lucide] { width:14px; height:14px; }
 
+  /* Product brand */
+  .product-brand { display:flex; align-items:center; gap:9px; min-width:0; flex:1; padding-left:2px; }
+  .product-mark { width:28px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center; color:#fff; background:linear-gradient(145deg,#b91c1c,#ef4444); box-shadow:0 4px 10px rgba(185,28,28,0.16); flex-shrink:0; }
+  .product-mark [data-lucide], .product-mark svg { width:16px !important; height:16px !important; stroke-width:2 !important; color:#fff !important; }
+  .product-name { font-size:14px; font-weight:650; color:#1f2937; line-height:1.15; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; letter-spacing:0; }
+
   .convo-item { padding: 6px 10px; border-radius:6px; cursor:pointer; font-size:13px; color:#374151; display:flex; align-items:center; gap:8px; transition: background .12s; }
   .convo-item:hover { background: rgba(0,0,0,0.04); }
   .convo-item.active { background: rgba(91, 108, 181, 0.12); color:#2d3580; }
@@ -1011,7 +1017,11 @@
   <!-- LEFT PANEL -->
   <aside id="leftPanel" class="flex flex-col" style="width:256px; min-width:256px;">
     <!-- Chrome / collapse row -->
-    <div class="flex items-center gap-1 px-3 pt-3 pb-2">
+    <div class="flex items-center gap-2 px-3 pt-3 pb-2">
+      <div class="product-brand" title="红手印剧本分析系统">
+        <div class="product-mark"><i data-lucide="hand"></i></div>
+        <div class="product-name">红手印剧本分析系统</div>
+      </div>
       <div class="icon-btn" id="collapseLeftBtn" title="收起侧栏"><i data-lucide="panel-left"></i></div>
     </div>
 

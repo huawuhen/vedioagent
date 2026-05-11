@@ -2664,6 +2664,11 @@
     renderStoryboardQuestion(sess);
   }
 
+  function removeStoryboardQACards(sess) {
+    if (!sess || !Array.isArray(sess.messages)) return;
+    sess.messages = sess.messages.filter(m => m.qaCard === undefined && !m._qaConfirm);
+  }
+
   function renderStoryboardQuestion(sess) {
     const qa = state._storyboardQA;
     if (!qa) return;
@@ -2677,6 +2682,7 @@
       return;
     }
 
+    removeStoryboardQACards(sess);
     let html = `<div class="qa-card"><div class="qa-title">${step.label}</div>`;
     if (step.compound) {
       html += `<div class="qa-compound">
@@ -2711,17 +2717,23 @@
   }
 
   function bindQAEvents() {
-    document.querySelectorAll('.qa-option-btn').forEach(btn => {
+    const cards = Array.from(document.querySelectorAll('.qa-card'));
+    const card = cards[cards.length - 1];
+    if (!card) return;
+
+    card.querySelectorAll('.qa-option-btn').forEach(btn => {
       btn.onclick = (e) => {
-        const val = e.target.dataset.val;
+        e.preventDefault();
+        e.stopPropagation();
+        const val = e.currentTarget.dataset.val;
         handleQAAnswer(val);
       };
     });
     document.querySelectorAll('.qa-back').forEach(btn => {
       btn.onclick = () => goBackQA();
     });
-    const customInput = document.querySelector('.qa-input-full[data-qa="customStyle"]');
-    const customSubmit = document.querySelector('.qa-custom-submit');
+    const customInput = card.querySelector('.qa-input-full[data-qa="customStyle"]');
+    const customSubmit = card.querySelector('.qa-custom-submit');
     if (customInput && customSubmit) {
       customInput.addEventListener('input', () => {
         customSubmit.style.display = customInput.value.trim() ? '' : 'none';
@@ -2732,19 +2744,19 @@
       };
       customInput.onkeydown = (e) => { if (e.key === 'Enter' && customInput.value.trim()) handleQAAnswer(customInput.value.trim()); };
     }
-    const confirmBtn = document.querySelector('.qa-confirm-btn');
+    const confirmBtn = card.querySelector('.qa-confirm-btn');
     if (confirmBtn) {
       confirmBtn.onclick = () => {
-        const episodes = document.querySelector('.qa-input[data-qa="episodes"]')?.value || '1';
-        const durBtns = document.querySelectorAll('.qa-options[data-qa="duration"] .qa-option-btn.selected');
-        const durCustom = document.querySelector('.qa-input-sm[data-qa="durationCustom"]')?.value?.trim();
+        const episodes = card.querySelector('.qa-input[data-qa="episodes"]')?.value || '1';
+        const durBtns = card.querySelectorAll('.qa-options[data-qa="duration"] .qa-option-btn.selected');
+        const durCustom = card.querySelector('.qa-input-sm[data-qa="durationCustom"]')?.value?.trim();
         const duration = durCustom || (durBtns.length ? durBtns[0].dataset.val : '60s');
         handleQAPlanAnswer(episodes, duration);
       };
-      document.querySelectorAll('.qa-options[data-qa="duration"] .qa-option-btn').forEach(btn => {
+      card.querySelectorAll('.qa-options[data-qa="duration"] .qa-option-btn').forEach(btn => {
         btn.onclick = (e) => {
           e.stopPropagation();
-          document.querySelectorAll('.qa-options[data-qa="duration"] .qa-option-btn').forEach(b => b.classList.remove('selected'));
+          card.querySelectorAll('.qa-options[data-qa="duration"] .qa-option-btn').forEach(b => b.classList.remove('selected'));
           btn.classList.add('selected');
         };
       });
@@ -2780,19 +2792,14 @@
     const qa = state._storyboardQA;
     if (!qa || qa.step <= 0) return;
     const sess = currentSession();
-    // Remove last QA card message
-    for (let i = sess.messages.length - 1; i >= 0; i--) {
-      if (sess.messages[i].qaCard !== undefined || sess.messages[i]._qaConfirm) {
-        sess.messages.splice(i, 1);
-        break;
-      }
-    }
+    removeStoryboardQACards(sess);
     qa.step--;
     renderStoryboardQuestion(sess);
   }
 
   function showStoryboardConfirm(sess) {
     const qa = state._storyboardQA;
+    removeStoryboardQACards(sess);
     const summary = `
       <div class="qa-card qa-confirm">
         <div class="qa-title">确认配置</div>

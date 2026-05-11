@@ -87,6 +87,8 @@ async function callDeepSeek({ systemPrompt, userMessage, opts = {} }) {
   const jsonOnlyInstruction = opts.noJsonFormat
     ? ''
     : '\n\n重要：你必须只输出一个合法 JSON 对象，不要输出 Markdown、代码块、解释、前后缀或任何 JSON 之外的内容。';
+  const maxTokens = Number(opts.maxTokens || process.env.LLM_MAX_TOKENS || 16384);
+  const timeoutMs = Number(opts.timeoutMs || process.env.LLM_TIMEOUT_MS || 180000);
   const body = {
     model: opts.model || process.env.DEEPSEEK_MODEL || 'deepseek-chat',
     messages: [
@@ -94,12 +96,12 @@ async function callDeepSeek({ systemPrompt, userMessage, opts = {} }) {
       { role: 'user', content: userMessage || '' }
     ],
     temperature: opts.temperature ?? 0.7,
-    max_tokens: opts.maxTokens || 8192
+    max_tokens: maxTokens
   };
   if (!opts.noJsonFormat) body.response_format = { type: 'json_object' };
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), opts.timeoutMs || 120000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const resp = await fetch('https://api.deepseek.com/v1/chat/completions', {
       method: 'POST',
@@ -118,7 +120,13 @@ async function callDeepSeek({ systemPrompt, userMessage, opts = {} }) {
       throw err;
     }
     const json = JSON.parse(raw);
-    let text = json.choices?.[0]?.message?.content || '';
+    const choice = json.choices?.[0] || {};
+    if (choice.finish_reason === 'length') {
+      const err = new Error(`模型输出超过当前 token 上限（${maxTokens}），响应被截断。请提高 LLM_MAX_TOKENS，或减少单次拆分镜头数量后重试。`);
+      err.status = 502;
+      throw err;
+    }
+    let text = choice.message?.content || '';
     if (!opts.noJsonFormat) text = extractJsonText(text);
     return {
       text,
