@@ -1,60 +1,246 @@
-# Video Agent Demo
+# VedioAgent
 
-短剧生产工作流 AI 协作工具的 HTML 原型演示。
+短剧生产工作流 AI 协作工具，覆盖“剧本拆解 → 分镜脚本 → 角色/场景生成 → 视频合成”的完整创作流程。
 
-完整展示从**剧本拆解 → 分镜脚本 → 角色场景生成 → 视频合成**的 4 步闭环工作流。
+当前版本已经从纯前端演示原型升级为可 Docker 部署的生产化骨架：
 
-## 在线体验
+- 前端：单页 HTML / Vanilla JavaScript / Tailwind CDN / Lucide Icons
+- 后端：Node.js / Express
+- 模型：后端代理 DeepSeek，API Key 不暴露到浏览器
+- 持久化：Docker volume 中的 `/app/data/state.json`
+- 部署：Docker / Docker Compose
 
-→ [Live Demo](https://bruce-agnet.github.io/vedioagent-demo/)
+> 说明：文本类技能已经接入真实 LLM 代理；图片/视频生成仍保留占位资源。要商用完整图像/视频生成，需要继续接入对应供应商的异步任务 API 和对象存储。
 
-## 演示路径
+## 功能
 
-打开后默认进入"短剧 S1E1"项目。建议依次浏览：
+- 剧本拆解：提取风格、角色、场景、道具，并生成图像提示词。
+- 分镜脚本：按场景拆镜头，输出景别、机位、动作、对白、音效和提示词。
+- 文件管理：项目级资产仓库、文件夹、详情预览、批注和下载。
+- 文档上传：支持上传文本、Markdown、JSON、CSV、PDF、DOC/DOCX、图片、视频、音频等参考素材。
+- 服务端模型代理：浏览器只请求 `/api/llm`，真实模型密钥只在服务端 `.env` 中配置。
+- 状态持久化：项目、会话、资产索引、收藏提示词等通过 `/api/state` 保存。
 
-1. **会话1 · 剧本拆解** — 上传剧本 → AI 拆出风格 / 角色 / 场景 / 道具，每条带可直接用的图像 prompt
-2. **会话2 · 分镜脚本** — 引用拆解结果 → AI 拆出 14 个镜头，每镜头含 videoPrompt
-3. **会话3 · 角色场景生成** — 复用上一步的 imagePrompt → 生成角色图、场景图（5 角色 / 7 场景 / 3 道具）
-4. **会话4 · 视频生成** — 引用前两步的图 + videoPrompt → 生成视频片段（含 storyboard 引用）
+## 快速部署
 
-右侧文件管理面板包含完整的资产仓库。点击右上 ↗ 进入文件管理最大化模式，详情面板会以"列表 + 详情"形式并排展示。
+### 1. 准备服务器
 
-## 演示模式说明
+推荐配置：
 
-- **演示数据**：所有 AI 响应均为预录数据，无真实 LLM 调用，无网络请求
-- **占位资源**：图片/视频均为 SVG 占位（实际产品中由 AI 生成）
-- **重置数据**：左下角"Bruce"头像 → "恢复初始状态"，清除本地所有自定义数据，返回演示原始状态
+- Linux 服务器，2C/2G 起步
+- Docker 24+
+- Docker Compose v2+
+- 开放端口：`3000`，或由 Nginx/Caddy 反代到 HTTPS 域名
 
-## 技术栈
+安装 Docker 可参考官方文档：
 
-- 单页 HTML / Vanilla JavaScript / Tailwind CDN / Lucide Icons
-- Node.js / Express 后端（生产部署版）
-- Docker / Docker Compose
-- Demo 数据在 `mock/data.js`，用户状态由后端 `/api/state` 持久化
+```bash
+curl -fsSL https://get.docker.com | sh
+sudo systemctl enable docker
+sudo systemctl start docker
+```
 
-## Docker 部署
+### 2. 拉取代码
+
+```bash
+git clone https://github.com/huawuhen/vedioagent.git
+cd vedioagent
+```
+
+### 3. 配置环境变量
 
 ```bash
 cp .env.example .env
+```
+
+编辑 `.env`：
+
+```env
+PORT=3000
+
+# true 为演示模式，不消耗模型额度；生产使用请改为 false
+MOCK_MODE=false
+
+LLM_PROVIDER=deepseek
+DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_API_KEY=sk-你的DeepSeekKey
+
+JSON_LIMIT=25mb
+```
+
+如果只想先验证页面，不调用真实模型，可以保持：
+
+```env
+MOCK_MODE=true
+```
+
+### 4. 启动服务
+
+```bash
 docker compose up -d --build
 ```
 
-访问 `http://localhost:3000`。
+查看状态：
 
-连接真实 DeepSeek 时，在 `.env` 中设置：
-
-```env
-MOCK_MODE=false
-DEEPSEEK_API_KEY=sk-你的-key
+```bash
+docker compose ps
+docker compose logs -f vedioagent
 ```
 
-更多生产部署建议见 [`DEPLOYMENT.md`](DEPLOYMENT.md)。
+健康检查：
 
-## 演示话术（5-7 分钟）
+```bash
+curl http://127.0.0.1:3000/healthz
+```
 
-1. (1 min) 介绍主线："短剧 S1E1 一集完整生产流程"
-2. (1 min) 会话1 剧本拆解：展示上传 → V1 → 批注 → V2 迭代轨迹
-3. (1 min) 会话2 分镜脚本：展示 V1 → 节奏修订 → V2，14 镜头每镜头含 videoPrompt
-4. (1.5 min) 会话3 角色场景生成：5 角色 + 7 场景 + 3 道具，使用 ✨ AI 优化展示 prompt 改写
-5. (1.5 min) 会话4 视频生成：展示视频引用前面图作 reference + storyboard 镜号
-6. (0.5 min) 文件管理面板：演示三列模式（树 / 列表 / 详情）+ 跨会话切换
+正常返回示例：
+
+```json
+{"ok":true,"mockMode":false,"provider":"deepseek"}
+```
+
+访问：
+
+```text
+http://你的服务器IP:3000
+```
+
+## 反向代理 HTTPS
+
+生产环境建议使用 Nginx 或 Caddy 做 HTTPS。
+
+### Nginx 示例
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+配置证书可使用 Certbot：
+
+```bash
+sudo certbot --nginx -d your-domain.com
+```
+
+### Caddy 示例
+
+```caddyfile
+your-domain.com {
+    reverse_proxy 127.0.0.1:3000
+}
+```
+
+## 数据持久化和备份
+
+`docker-compose.yml` 使用命名 volume 保存状态：
+
+```text
+vedioagent_data:/app/data
+```
+
+容器内状态文件：
+
+```text
+/app/data/state.json
+```
+
+备份：
+
+```bash
+docker run --rm \
+  -v vedioagent_vedioagent_data:/data \
+  -v "$PWD":/backup \
+  alpine tar czf /backup/vedioagent-data.tgz -C /data .
+```
+
+恢复：
+
+```bash
+docker compose down
+docker run --rm \
+  -v vedioagent_vedioagent_data:/data \
+  -v "$PWD":/backup \
+  alpine sh -c "rm -rf /data/* && tar xzf /backup/vedioagent-data.tgz -C /data"
+docker compose up -d
+```
+
+## 更新部署
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+如果只改了环境变量：
+
+```bash
+docker compose up -d
+```
+
+停止服务：
+
+```bash
+docker compose down
+```
+
+停止并删除数据卷：
+
+```bash
+docker compose down -v
+```
+
+## 本地开发
+
+```bash
+npm install
+cp .env.example .env
+npm run dev
+```
+
+打开：
+
+```text
+http://localhost:3000
+```
+
+常用检查：
+
+```bash
+node --check server.js
+node --check app.js
+curl http://localhost:3000/api/config
+```
+
+## 环境变量
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `PORT` | `3000` | 服务端口 |
+| `MOCK_MODE` | `true` | 是否使用演示模式 |
+| `LLM_PROVIDER` | `deepseek` | 模型供应商，目前支持 DeepSeek |
+| `DEEPSEEK_MODEL` | `deepseek-chat` | DeepSeek 模型名 |
+| `DEEPSEEK_API_KEY` | 空 | DeepSeek API Key，只在服务端使用 |
+| `DATA_DIR` | `/app/data` | 状态文件目录 |
+| `JSON_LIMIT` | `25mb` | API JSON 请求体上限 |
+
+## 生产化建议
+
+当前版本适合 MVP、内测和单机部署。正式商用建议继续升级：
+
+- 数据库：把 JSON 文件状态迁移到 PostgreSQL。
+- 对象存储：上传剧本、图片、视频放到 S3 / R2 / OSS / MinIO。
+- 任务队列：图片/视频生成改为异步 job，使用 Redis + BullMQ。
+- 鉴权：加入登录、团队、项目权限和审计日志。
+- 安全：上传文件扫描、速率限制、模型成本限额。
+- 可观测性：接入结构化日志、错误追踪、指标和告警。
