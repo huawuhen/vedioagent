@@ -16,6 +16,7 @@ const mockMode = String(process.env.MOCK_MODE || '').toLowerCase() === 'true' ||
 
 app.set('trust proxy', 1);
 app.use(helmet({
+  hsts: false,
   contentSecurityPolicy: {
     useDefaults: true,
     directives: {
@@ -26,7 +27,8 @@ app.use(helmet({
       "media-src": ["'self'", "data:", "blob:", "https:"],
       "connect-src": ["'self'"],
       "font-src": ["'self'", "data:"],
-      "object-src": ["'none'"]
+      "object-src": ["'none'"],
+      "upgrade-insecure-requests": null
     }
   }
 }));
