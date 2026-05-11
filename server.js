@@ -223,8 +223,14 @@ app.post('/api/llm', async (req, res, next) => {
 
 app.use(express.static(__dirname, {
   extensions: ['html'],
-  maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0,
-  etag: true
+  etag: true,
+  setHeaders(res, filePath) {
+    if (/\.(html|js|css)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    } else {
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+    }
+  }
 }));
 
 app.get('*', (_req, res) => {

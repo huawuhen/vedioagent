@@ -318,7 +318,9 @@
       ui: {
         splitRatio: state.libraryUI.splitRatio || 0.6,
         rightPanelTab: state.rightPanelTab || 'files',
-        libTreeCollapsed: !!state.libraryUI.treeCollapsed
+        libTreeCollapsed: !!state.libraryUI.treeCollapsed,
+        currentProjectId: state.currentProjectId || null,
+        currentSessionId: state.currentSessionId || null
       },
       favoritePrompts: state.favoritePrompts || [],
       customSkills: customSkills || [],
@@ -435,8 +437,20 @@
     if (Array.isArray(parsed.customSkills)) customSkills = parsed.customSkills;
 
     parsed.projects.forEach(persisted => {
-      const proj = state.projects.find(p => p.id === persisted.id);
-      if (!proj) return;
+      let proj = state.projects.find(p => p.id === persisted.id);
+      if (!proj) {
+        proj = {
+          id: persisted.id || newId('p'),
+          name: persisted.name || '新项目',
+          templateId: 'restored',
+          createdAt: persisted.createdAt || Date.now(),
+          sessions: [],
+          assets: { text: [], image: [], video: [], audio: [] },
+          folders: [],
+          sessionFolders: []
+        };
+        state.projects.push(proj);
+      }
 
       if (Array.isArray(persisted.folders) && persisted.folders.length > 0) {
         proj.folders = persisted.folders.map(f => ({ ...f }));
@@ -498,6 +512,35 @@
       if (persisted.name) proj.name = persisted.name;
       if (persisted.archived) proj.archived = true;
     });
+
+    if (parsed.ui?.currentProjectId) state.currentProjectId = parsed.ui.currentProjectId;
+    if (parsed.ui?.currentSessionId) state.currentSessionId = parsed.ui.currentSessionId;
+  }
+
+  function repairActiveSelection() {
+    const visibleProjects = state.projects.filter(p => !p.archived);
+    if (visibleProjects.length === 0 && state.projects.length > 0) {
+      state.projects[0].archived = false;
+      visibleProjects.push(state.projects[0]);
+    }
+
+    let project = state.projects.find(p => p.id === state.currentProjectId && !p.archived);
+    if (!project) {
+      project = visibleProjects.find(p => (p.sessions || []).length > 0) || visibleProjects[0] || null;
+      state.currentProjectId = project ? project.id : null;
+    }
+
+    if (!project) {
+      state.currentSessionId = null;
+      return;
+    }
+
+    const session = (project.sessions || []).find(s => s.id === state.currentSessionId);
+    if (!session) {
+      state.currentSessionId = (project.sessions || [])[0]?.id || null;
+    }
+
+    state.expandedProjects.add(project.id);
   }
 
   // ───── helpers ─────
@@ -5398,6 +5441,7 @@
     migrateProjects();
     await loadPersistedState();
     validateFolderRefs();
+    repairActiveSelection();
     // Demo mode: seed favoritePrompts from mock if user has none persisted
     if (!state.favoritePrompts || state.favoritePrompts.length === 0) {
       if (Array.isArray(M.INITIAL_FAVORITES)) state.favoritePrompts = M.INITIAL_FAVORITES.slice();
